@@ -12,3 +12,12 @@ function closeMenu(){nav.classList.remove('open');menu.setAttribute('aria-expand
 document.addEventListener('click',e=>{if(!nav.contains(e.target)&&!menu.contains(e.target))closeMenu()});document.addEventListener('keydown',e=>{if(e.key==='Escape')closeMenu()});nav.querySelectorAll('a').forEach(a=>a.addEventListener('click',closeMenu));
 const dialogObserver=new MutationObserver(()=>{document.body.classList.toggle('modal-open',!!document.querySelector('dialog[open]'));if(document.querySelector('dialog[open]'))closeMenu()});document.querySelectorAll('dialog').forEach(d=>dialogObserver.observe(d,{attributes:true,attributeFilter:['open']}));
 if(window.visualViewport){const dock=document.querySelector('.mobile-dock');const syncKeyboard=()=>dock.classList.toggle('keyboard-hidden',!!document.querySelector('dialog[open]')&&window.visualViewport.height<innerHeight*.8);window.visualViewport.addEventListener('resize',syncKeyboard,{passive:true})}
+
+// A CSS-first intro cannot leave an invisible interaction blocker behind.
+function finishIntro(el){if(el&&el.isConnected)el.remove();}
+function armIntro(el){if(!el)return;el.addEventListener('animationend',e=>{if(e.target===el&&e.animationName==='introOut')finishIntro(el)});setTimeout(()=>finishIntro(el),2800);}
+armIntro(document.querySelector('.intro'));
+// Replay uses the same bounded animation even after the original overlay is removed.
+const replayButton=document.querySelector('#replay');
+const safeReplay=replayButton.cloneNode(true);replayButton.replaceWith(safeReplay);
+safeReplay.addEventListener('click',()=>{document.querySelector('.intro')?.remove();const el=document.createElement('div');el.className='intro';el.setAttribute('aria-hidden','true');el.innerHTML='<div class="intro-brand">MX<span>auto</span></div><div class="headlights"><i></i><i></i></div><p>ДЕТЕЙЛИНГ-СТУДИЯ В МИНСКЕ</p>';document.body.append(el);armIntro(el)});
