@@ -271,7 +271,7 @@ function armIntro(intro) {
   intro.addEventListener('keydown', event => {
     if (event.key === 'Escape') intro.classList.add('leaving');
   });
-  introTimer = setTimeout(() => { if (currentIntro === intro) finishIntro(); }, 2400);
+  introTimer = setTimeout(() => { if (currentIntro === intro) finishIntro(); }, 2600);
 }
 armIntro($('.intro'));
 $('#replay').addEventListener('click', () => {
