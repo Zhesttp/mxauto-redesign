@@ -3,6 +3,18 @@ const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const mobileMenu = matchMedia('(max-width: 820px)');
+// Touch must clear emulated/sticky hover; keyboard focus stays accessible.
+const inputRoot = document.documentElement;
+inputRoot.dataset.input = matchMedia('(hover: hover) and (pointer: fine)').matches ? 'mouse' : 'touch';
+addEventListener('pointerdown', event => {
+  inputRoot.dataset.input = event.pointerType === 'mouse' ? 'mouse' : 'touch';
+}, {passive:true,capture:true});
+addEventListener('pointermove', event => {
+  if (event.pointerType === 'mouse' && inputRoot.dataset.input !== 'mouse') inputRoot.dataset.input = 'mouse';
+}, {passive:true});
+addEventListener('keydown', event => {
+  if (['Tab','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)) inputRoot.dataset.input = 'keyboard';
+}, {capture:true});
 const menu = $('.menu');
 const nav = $('nav');
 const menuBackdrop = $('.menu-backdrop');
@@ -99,6 +111,34 @@ $('#car').addEventListener('input', event => event.target.setCustomValidity(''))
 
 const workCards = $$('.work');
 const works = $('.works');
+// Keep native scrolling; block only the synthetic click following a swipe/hold.
+let galleryGesture = null;
+let suppressGalleryClick = false;
+function galleryGestureIsTap(gesture, x, y, now) {
+  return !gesture.moved && Math.abs(x - gesture.x) < 8 && Math.abs(y - gesture.y) < 8 && now - gesture.started < 450;
+}
+works.addEventListener('pointerdown', event => {
+  suppressGalleryClick = false;
+  if (event.pointerType === 'mouse' || !event.isPrimary) return;
+  galleryGesture = {id:event.pointerId,x:event.clientX,y:event.clientY,started:performance.now(),moved:false};
+}, {passive:true});
+works.addEventListener('pointermove', event => {
+  if (!galleryGesture || event.pointerId !== galleryGesture.id) return;
+  if (Math.abs(event.clientX - galleryGesture.x) >= 8 || Math.abs(event.clientY - galleryGesture.y) >= 8) galleryGesture.moved = true;
+}, {passive:true});
+works.addEventListener('pointerup', event => {
+  if (!galleryGesture || event.pointerId !== galleryGesture.id) return;
+  suppressGalleryClick = !galleryGestureIsTap(galleryGesture, event.clientX, event.clientY, performance.now());
+  galleryGesture = null;
+}, {passive:true});
+works.addEventListener('pointercancel', event => {
+  if (!galleryGesture || event.pointerId !== galleryGesture.id) return;
+  suppressGalleryClick = true;
+  galleryGesture = null;
+}, {passive:true});
+works.addEventListener('click', event => {
+  if (event.detail !== 0 && suppressGalleryClick && event.target.closest('.work')) event.preventDefault();
+}, {capture:true});
 const galleryFill = $('.gallery-progress span');
 let galleryFrame = 0;
 let galleryMax = 0;
@@ -178,7 +218,7 @@ if ('IntersectionObserver' in window) {
     if (entry.isIntersecting) { entry.target.classList.add('in-view'); reveal.unobserve(entry.target); }
   }), {threshold:.08});
   if (!reducedMotion.matches) {
-    $$('.section-head,.service,.selection,.work,.steps article,.contact-grid').forEach(element => {
+    $$('.section-head,.service,.selection,.steps article,.contact-grid').forEach(element => {
       if (element.getBoundingClientRect().top < innerHeight) return;
       element.classList.add('reveal-ready'); reveal.observe(element);
     });
