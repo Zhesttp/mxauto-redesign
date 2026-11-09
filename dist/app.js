@@ -73,13 +73,7 @@ $$('dialog').forEach(dialog => {
   dialog.addEventListener('close', () => {
     document.body.classList.toggle('modal-open', !!$('dialog[open]'));
     if (returnFocus?.isConnected) returnFocus.focus({preventScroll:true});
-    if (dialog === photo) {
-      photoRequest++;
-      photoAnimation?.cancel();
-      $('img', photo).removeAttribute('src');
-      $('.photo-status').textContent = '';
-      photo.removeAttribute('aria-busy');
-    }
+
   });
 });
 const booking = $('#booking');
@@ -103,54 +97,7 @@ $('#request-form').addEventListener('submit', event => {
 });
 $('#car').addEventListener('input', event => event.target.setCustomValidity(''));
 
-const photo = $('#photo');
-const workCards = $$('[data-photo]');
-let photoIndex = 0;
-let photoRequest = 0;
-let photoAnimation;
-async function showPhoto(index) {
-  photoIndex = (index + workCards.length) % workCards.length;
-  const card = workCards[photoIndex];
-  const request = ++photoRequest;
-  const image = $('img', photo);
-  photo.setAttribute('aria-busy', 'true');
-  $('.photo-status').textContent = 'Загружаем фотографию…';
-  $('h3', photo).textContent = card.dataset.title;
-  $('.photo-count').textContent = `${photoIndex + 1} / ${workCards.length}`;
-  photoAnimation?.cancel();
-  if (!reducedMotion.matches && image.hasAttribute('src')) {
-    photoAnimation = image.animate([{opacity:1},{opacity:0}], {duration:120,fill:'forwards'});
-  }
-  const preload = new Image();
-  preload.src = card.dataset.photo;
-  try {
-    await preload.decode();
-    if (request !== photoRequest) return;
-    if (photoAnimation) await photoAnimation.finished.catch(() => {});
-    if (request !== photoRequest) return;
-    image.src = card.dataset.photo;
-    image.alt = `${card.dataset.title} — работа студии MXauto`;
-    photoAnimation?.cancel();
-    if (!reducedMotion.matches) {
-      photoAnimation = image.animate([{opacity:0},{opacity:1}], {duration:220,easing:'ease-out'});
-    }
-    $('.photo-status').textContent = '';
-  } catch {
-    if (request !== photoRequest) return;
-    photoAnimation?.cancel();
-    $('.photo-status').textContent = 'Не удалось загрузить фото. Попробуйте выбрать его ещё раз.';
-  } finally {
-    if (request === photoRequest) photo.removeAttribute('aria-busy');
-  }
-}
-workCards.forEach((card, index) => card.addEventListener('click', () => { openDialog(photo); showPhoto(index); }));
-$('#photo-prev').addEventListener('click', () => showPhoto(photoIndex - 1));
-$('#photo-next').addEventListener('click', () => showPhoto(photoIndex + 1));
-photo.addEventListener('keydown', event => {
-  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-    event.preventDefault(); showPhoto(photoIndex + (event.key === 'ArrowLeft' ? -1 : 1));
-  }
-});
+const workCards = $$('.work');
 const works = $('.works');
 const galleryFill = $('.gallery-progress span');
 let galleryFrame = 0;
@@ -250,7 +197,6 @@ if ('IntersectionObserver' in window) {
 reducedMotion.addEventListener('change', () => {
   if (reducedMotion.matches) {
     $$('.reveal-ready').forEach(element => element.classList.add('in-view'));
-    photoAnimation?.cancel();
     $$('.steps article').forEach(article => article.classList.add('step-complete'));
     $('.steps-track span').style.transform = 'scaleY(1)';
     finishIntro();
@@ -312,9 +258,12 @@ function finishIntro() {
 function armIntro(intro) {
   clearTimeout(introTimer);
   currentIntro = intro;
-  if (!intro || reducedMotion.matches) { finishIntro(); return; }
+  if (!intro || reducedMotion.matches || getComputedStyle(intro).visibility === 'hidden') { finishIntro(); return; }
   document.body.classList.add('intro-playing');
   introBackground.forEach(element => { element.inert = true; });
+  intro.addEventListener('animationstart', event => {
+    if (event.target === intro && event.animationName === 'introOut') document.body.classList.add('page-ready');
+  });
   intro.addEventListener('animationend', event => {
     if (event.target === intro && currentIntro === intro) finishIntro();
   });
@@ -322,7 +271,7 @@ function armIntro(intro) {
   intro.addEventListener('keydown', event => {
     if (event.key === 'Escape') intro.classList.add('leaving');
   });
-  introTimer = setTimeout(() => { if (currentIntro === intro) finishIntro(); }, 2600);
+  introTimer = setTimeout(() => { if (currentIntro === intro) finishIntro(); }, 2400);
 }
 armIntro($('.intro'));
 $('#replay').addEventListener('click', () => {
