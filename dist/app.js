@@ -13,6 +13,8 @@ function setMenu(open, restoreFocus = false) {
   menu.setAttribute('aria-expanded', String(open));
   menu.setAttribute('aria-label', open ? 'Закрыть меню' : 'Открыть меню');
   nav.inert = mobileMenu.matches && !open;
+  const background = [$('#main'), $('footer'), $('.mobile-dock')];
+  background.forEach(element => { element.inert = open || document.body.classList.contains('intro-playing'); });
   if (restoreFocus) menu.focus();
 }
 menu.addEventListener('click', () => setMenu(menu.getAttribute('aria-expanded') !== 'true'));
@@ -24,12 +26,11 @@ document.addEventListener('keydown', event => {
   if (menu.getAttribute('aria-expanded') !== 'true') return;
   if (event.key === 'Escape') setMenu(false, true);
   if (event.key === 'Tab') {
-    const links = $$('a', nav);
-    if (event.shiftKey && document.activeElement === menu) {
-      event.preventDefault(); links.at(-1).focus();
-    } else if (!event.shiftKey && document.activeElement === links.at(-1)) {
-      event.preventDefault(); menu.focus();
-    }
+    const controls = [menu, ...$$('a', nav)];
+    const index = controls.indexOf(document.activeElement);
+    const next = (index + (event.shiftKey ? -1 : 1) + controls.length) % controls.length;
+    event.preventDefault();
+    controls[next].focus();
   }
 });
 
@@ -72,6 +73,13 @@ $$('dialog').forEach(dialog => {
   dialog.addEventListener('close', () => {
     document.body.classList.toggle('modal-open', !!$('dialog[open]'));
     if (returnFocus?.isConnected) returnFocus.focus({preventScroll:true});
+    if (dialog === photo) {
+      photoRequest++;
+      photoAnimation?.cancel();
+      $('img', photo).removeAttribute('src');
+      $('.photo-status').textContent = '';
+      photo.removeAttribute('aria-busy');
+    }
   });
 });
 const booking = $('#booking');
@@ -98,15 +106,44 @@ $('#car').addEventListener('input', event => event.target.setCustomValidity(''))
 const photo = $('#photo');
 const workCards = $$('[data-photo]');
 let photoIndex = 0;
-function showPhoto(index) {
+let photoRequest = 0;
+let photoAnimation;
+async function showPhoto(index) {
   photoIndex = (index + workCards.length) % workCards.length;
   const card = workCards[photoIndex];
-  $('img', photo).src = card.dataset.photo;
-  $('img', photo).alt = `${card.dataset.title} — работа студии MXauto`;
+  const request = ++photoRequest;
+  const image = $('img', photo);
+  photo.setAttribute('aria-busy', 'true');
+  $('.photo-status').textContent = 'Загружаем фотографию…';
   $('h3', photo).textContent = card.dataset.title;
   $('.photo-count').textContent = `${photoIndex + 1} / ${workCards.length}`;
+  photoAnimation?.cancel();
+  if (!reducedMotion.matches && image.hasAttribute('src')) {
+    photoAnimation = image.animate([{opacity:1},{opacity:0}], {duration:120,fill:'forwards'});
+  }
+  const preload = new Image();
+  preload.src = card.dataset.photo;
+  try {
+    await preload.decode();
+    if (request !== photoRequest) return;
+    if (photoAnimation) await photoAnimation.finished.catch(() => {});
+    if (request !== photoRequest) return;
+    image.src = card.dataset.photo;
+    image.alt = `${card.dataset.title} — работа студии MXauto`;
+    photoAnimation?.cancel();
+    if (!reducedMotion.matches) {
+      photoAnimation = image.animate([{opacity:0},{opacity:1}], {duration:220,easing:'ease-out'});
+    }
+    $('.photo-status').textContent = '';
+  } catch {
+    if (request !== photoRequest) return;
+    photoAnimation?.cancel();
+    $('.photo-status').textContent = 'Не удалось загрузить фото. Попробуйте выбрать его ещё раз.';
+  } finally {
+    if (request === photoRequest) photo.removeAttribute('aria-busy');
+  }
 }
-workCards.forEach((card, index) => card.addEventListener('click', () => { showPhoto(index); openDialog(photo); }));
+workCards.forEach((card, index) => card.addEventListener('click', () => { openDialog(photo); showPhoto(index); }));
 $('#photo-prev').addEventListener('click', () => showPhoto(photoIndex - 1));
 $('#photo-next').addEventListener('click', () => showPhoto(photoIndex + 1));
 photo.addEventListener('keydown', event => {
@@ -115,11 +152,31 @@ photo.addEventListener('keydown', event => {
   }
 });
 const works = $('.works');
+const galleryFill = $('.gallery-progress span');
+let galleryFrame = 0;
+let galleryMax = 0;
+let galleryStops = [];
+let galleryIndex = -1;
+function measureGallery() {
+  const padding = parseFloat(getComputedStyle(works).paddingLeft) || 0;
+  const left = works.getBoundingClientRect().left;
+  galleryMax = Math.max(0, works.scrollWidth - works.clientWidth);
+  galleryStops = workCards.map(card => Math.max(0, Math.min(galleryMax,
+    card.getBoundingClientRect().left - left + works.scrollLeft - padding)));
+  updateGallery();
+}
 function updateGallery() {
-  const index = workCards.reduce((best, card, i) => Math.abs(card.getBoundingClientRect().left - works.getBoundingClientRect().left - parseFloat(getComputedStyle(works).paddingLeft)) < Math.abs(workCards[best].getBoundingClientRect().left - works.getBoundingClientRect().left - parseFloat(getComputedStyle(works).paddingLeft)) ? i : best, 0);
-  $('#gallery-count').textContent = `${String(index + 1).padStart(2, '0')} / ${String(workCards.length).padStart(2, '0')}`;
-  $('#gallery-prev').disabled = works.scrollLeft < 4;
-  $('#gallery-next').disabled = works.scrollLeft >= works.scrollWidth - works.clientWidth - 4;
+  galleryFrame = 0;
+  const position = Math.max(0, Math.min(galleryMax, works.scrollLeft));
+  const index = galleryStops.reduce((best, stop, i) => Math.abs(stop - position) < Math.abs(galleryStops[best] - position) ? i : best, 0);
+  if (index !== galleryIndex) {
+    galleryIndex = index;
+    $('#gallery-count').textContent = `${String(index + 1).padStart(2, '0')} / ${String(workCards.length).padStart(2, '0')}`;
+  }
+  $('#gallery-prev').disabled = position < 4;
+  $('#gallery-next').disabled = position >= galleryMax - 4;
+  const progress = galleryMax ? (1 + position / galleryMax * (workCards.length - 1)) / workCards.length : 1;
+  galleryFill.style.transform = `scaleX(${progress})`;
 }
 function moveGallery(direction) {
   const step = workCards[0].getBoundingClientRect().width + parseFloat(getComputedStyle(works).gap);
@@ -127,7 +184,9 @@ function moveGallery(direction) {
 }
 $('#gallery-prev').addEventListener('click', () => moveGallery(-1));
 $('#gallery-next').addEventListener('click', () => moveGallery(1));
-works.addEventListener('scroll', updateGallery, {passive:true});
+works.addEventListener('scroll', () => {
+  if (!galleryFrame) galleryFrame = requestAnimationFrame(updateGallery);
+}, {passive:true});
 works.addEventListener('keydown', event => {
   if (event.target !== works || !['ArrowLeft','ArrowRight'].includes(event.key)) return;
   event.preventDefault(); moveGallery(event.key === 'ArrowLeft' ? -1 : 1);
@@ -139,11 +198,16 @@ $$('.faq details').forEach(details => {
   const answer = $('.faq-answer', details);
   let animation;
   let desiredOpen = details.open;
+  reducedMotion.addEventListener('change', () => {
+    if (reducedMotion.matches && animation) {
+      animation.cancel(); animation = null; details.open = desiredOpen;
+    }
+  });
   summary.addEventListener('click', event => {
     if (reducedMotion.matches || !answer.animate) return;
     event.preventDefault();
     const from = details.open ? answer.getBoundingClientRect().height : 0;
-    desiredOpen = !desiredOpen;
+    desiredOpen = animation ? !desiredOpen : !details.open;
     animation?.cancel();
     details.open = true;
     animation = answer.animate([{height:`${from}px`,opacity:from ? 1 : 0},{height:`${desiredOpen ? answer.scrollHeight : 0}px`,opacity:desiredOpen ? 1 : 0}],{duration:320,easing:'cubic-bezier(.22,1,.36,1)',fill:'both'});
@@ -160,8 +224,8 @@ function updateScroll() {
   $('header').classList.toggle('scrolled', scrollY > 16);
 }
 addEventListener('scroll', () => { if (!scrollFrame) scrollFrame = requestAnimationFrame(updateScroll); }, {passive:true});
-addEventListener('resize', () => { updateScroll(); updateGallery(); }, {passive:true});
-updateScroll(); updateGallery();
+addEventListener('resize', () => { updateScroll(); measureGallery(); measureSteps(); }, {passive:true});
+updateScroll(); measureGallery();
 if ('IntersectionObserver' in window) {
   const reveal = new IntersectionObserver(entries => entries.forEach(entry => {
     if (entry.isIntersecting) { entry.target.classList.add('in-view'); reveal.unobserve(entry.target); }
@@ -186,25 +250,85 @@ if ('IntersectionObserver' in window) {
 reducedMotion.addEventListener('change', () => {
   if (reducedMotion.matches) {
     $$('.reveal-ready').forEach(element => element.classList.add('in-view'));
-    $('.intro')?.remove();
+    photoAnimation?.cancel();
+    $$('.steps article').forEach(article => article.classList.add('step-complete'));
+    $('.steps-track span').style.transform = 'scaleY(1)';
+    finishIntro();
   }
 });
 
-// Keep the headlight signature, with a bounded lifetime and immediate skip.
-let introTimer;
-function armIntro(intro) {
-  if (!intro) return;
-  clearTimeout(introTimer);
-  if (reducedMotion.matches) { intro.remove(); return; }
-  const finish = () => { clearTimeout(introTimer); intro.remove(); };
-  intro.addEventListener('animationend', event => { if (event.target === intro) finish(); });
-  intro.addEventListener('click', () => intro.classList.add('leaving'));
-  introTimer = setTimeout(finish, 2600);
+// Each process step is observed once; no per-frame scroll measurements.
+const steps = $('.steps');
+const stepArticles = $$('article', steps);
+const stepTrack = $('.steps-track');
+const stepFill = $('span', stepTrack);
+let completedStep = -1;
+function measureSteps() {
+  const first = $('span', stepArticles[0]);
+  const last = $('span', stepArticles.at(-1));
+  const start = stepArticles[0].offsetTop + first.offsetTop + first.offsetHeight / 2;
+  const end = stepArticles.at(-1).offsetTop + last.offsetTop + last.offsetHeight / 2;
+  stepTrack.style.top = `${start}px`;
+  stepTrack.style.height = `${Math.max(0, end - start)}px`;
 }
+measureSteps();
+if ('ResizeObserver' in window) {
+  const layoutObserver = new ResizeObserver(() => { measureGallery(); measureSteps(); });
+  layoutObserver.observe(works);
+  layoutObserver.observe(steps);
+}
+if (!reducedMotion.matches && 'IntersectionObserver' in window) {
+  const stepObserver = new IntersectionObserver(entries => entries.forEach(entry => {
+    if (!entry.isIntersecting) return;
+    const index = stepArticles.indexOf(entry.target);
+    completedStep = Math.max(completedStep, index);
+    stepFill.style.transform = `scaleY(${completedStep / Math.max(1, stepArticles.length - 1)})`;
+    stepArticles.slice(0, completedStep + 1).forEach(article => article.classList.add('step-complete'));
+    stepObserver.unobserve(entry.target);
+  }), {threshold:.4});
+  stepArticles.forEach(article => stepObserver.observe(article));
+} else {
+  stepFill.style.transform = 'scaleY(1)';
+  stepArticles.forEach(article => article.classList.add('step-complete'));
+}
+
+// The intro remains bounded; background controls become available on completion.
+let introTimer;
+let currentIntro;
+let introReturnFocus;
 const introTemplate = $('.intro').cloneNode(true);
+const introBackground = $$('header,main,footer,.mobile-dock,.skip-link');
+function finishIntro() {
+  clearTimeout(introTimer);
+  if (!currentIntro) { document.body.classList.add('page-ready'); return; }
+  const focusedInside = currentIntro.contains(document.activeElement);
+  currentIntro?.remove();
+  currentIntro = null;
+  document.body.classList.remove('intro-playing');
+  document.body.classList.add('page-ready');
+  introBackground.forEach(element => { element.inert = false; });
+  if (focusedInside) (introReturnFocus || $('.hero h1')).focus({preventScroll:true});
+}
+function armIntro(intro) {
+  clearTimeout(introTimer);
+  currentIntro = intro;
+  if (!intro || reducedMotion.matches) { finishIntro(); return; }
+  document.body.classList.add('intro-playing');
+  introBackground.forEach(element => { element.inert = true; });
+  intro.addEventListener('animationend', event => {
+    if (event.target === intro && currentIntro === intro) finishIntro();
+  });
+  intro.addEventListener('click', () => intro.classList.add('leaving'));
+  intro.addEventListener('keydown', event => {
+    if (event.key === 'Escape') intro.classList.add('leaving');
+  });
+  introTimer = setTimeout(() => { if (currentIntro === intro) finishIntro(); }, 2600);
+}
 armIntro($('.intro'));
 $('#replay').addEventListener('click', () => {
-  $('.intro')?.remove();
+  finishIntro();
+  introReturnFocus = $('#replay');
   const intro = introTemplate.cloneNode(true);
   document.body.append(intro); armIntro(intro);
+  if (!reducedMotion.matches) $('.intro-skip', intro).focus({preventScroll:true});
 });
